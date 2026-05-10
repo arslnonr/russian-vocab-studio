@@ -45,7 +45,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Or just double‑click `run.command` (macOS) / `BAŞLAT.bat` (Windows) — the script creates the venv, installs deps, and launches the app on first run.
+Or just double‑click `run.command` (macOS) / `run.bat` (Windows) — the script creates the venv, installs deps, and launches the app on first run.
 
 ### Optional — OCR for scanned PDFs
 
@@ -91,7 +91,7 @@ russian-vocab-studio/
 ├── translations.py     # TR / RU / EN bundles
 ├── requirements.txt
 ├── run.command         # macOS launcher
-├── BAŞLAT.bat          # Windows launcher
+├── run.bat          # Windows launcher
 └── .github/workflows/  # CI builds .exe and .app on every tag
 ```
 

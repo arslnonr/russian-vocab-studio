@@ -1,6 +1,6 @@
 #!/bin/bash
-# macOS launcher — keeps Terminal open and prints WHY it failed.
-# Uses PySide6 (Qt) instead of tkinter, so no Tcl/Tk version pain.
+# macOS launcher — double-click to start Russian Vocab Studio.
+# Keeps Terminal open and prints why it failed if anything goes wrong.
 
 cd "$(dirname "$0")"
 xattr -dr com.apple.quarantine . 2>/dev/null || true
@@ -9,13 +9,12 @@ LOG="run_log.txt"
 exec > >(tee "$LOG") 2>&1
 
 echo "──────────────────────────────────────────────"
-echo "  Rusça Kelime Stüdyosu — launcher"
+echo "  Russian Vocab Studio — launcher"
 echo "  $(date)"
 echo "  Folder: $(pwd)"
 echo "──────────────────────────────────────────────"
 
-# Look for any working Python 3.10+ — Qt itself doesn't care which one,
-# we just need a venv we can install PySide6 into.
+# Look for any working Python 3.10+
 CANDIDATES=(
   "/opt/homebrew/bin/python3"
   "/opt/homebrew/bin/python3.12"
@@ -32,7 +31,6 @@ PY=""
 for cand in "${CANDIDATES[@]}"; do
   [ -z "$cand" ] && continue
   [ -x "$cand" ] || continue
-  out=$("$cand" -c "import sys; print(sys.version_info[:2])" 2>&1) || continue
   ver=$("$cand" -c "import sys; print(sys.version_info[0]*100+sys.version_info[1])" 2>/dev/null)
   if [ -n "$ver" ] && [ "$ver" -ge 310 ]; then
     PY="$cand"
@@ -44,17 +42,17 @@ done
 
 if [ -z "$PY" ]; then
   echo
-  echo "❌  Python 3.10+ bulunamadı."
-  echo "    Lütfen şuradan kur: https://www.python.org/downloads/macos/"
-  echo "    (universal2 / Apple Silicon uyumlu olan)"
+  echo "ERROR: Python 3.10+ not found."
+  echo "    Install it from: https://www.python.org/downloads/macos/"
+  echo "    (pick the universal2 / Apple Silicon build)"
   echo
-  read -n1 -r -p "Kapatmak için bir tuşa bas…"
+  read -n1 -r -p "Press any key to close…"
   exit 1
 fi
 
 VENV=".venv"
 
-# If a previous run created a venv with a different Python, rebuild it.
+# Rebuild venv if it was created with a different Python.
 if [ -d "$VENV" ]; then
   if [ -x "$VENV/bin/python" ]; then
     venv_real="$(readlink -f "$VENV/bin/python" 2>/dev/null || echo "")"
@@ -69,31 +67,31 @@ fi
 if [ ! -d "$VENV" ]; then
   echo "Creating virtualenv ($VENV)…"
   if ! "$PY" -m venv "$VENV"; then
-    echo "❌  venv oluşturulamadı."
-    read -n1 -r -p "Kapatmak için bir tuşa bas…"
+    echo "ERROR: failed to create virtualenv."
+    read -n1 -r -p "Press any key to close…"
     exit 1
   fi
 fi
 
 VENV_PY="$VENV/bin/python"
 
-echo "Bağımlılıklar kontrol ediliyor (ilk açılışta birkaç dakika sürebilir)…"
+echo "Checking dependencies (first run can take 3-5 minutes)…"
 "$VENV_PY" -m pip install --upgrade pip --quiet 2>/dev/null
 if ! "$VENV_PY" -m pip install -r requirements.txt --quiet; then
-  echo "❌  Bağımlılıklar kurulamadı (yukarıya bak)."
-  read -n1 -r -p "Kapatmak için bir tuşa bas…"
+  echo "ERROR: failed to install dependencies. See messages above."
+  read -n1 -r -p "Press any key to close…"
   exit 1
 fi
 
-echo "Uygulama başlatılıyor…"
+echo "Launching app…"
 echo "──────────────────────────────────────────────"
 echo
 
 if ! "$VENV_PY" app.py; then
   echo
   echo "──────────────────────────────────────────────"
-  echo "❌  Uygulama hata ile kapandı."
-  echo "    Tam log: $(pwd)/$LOG"
-  read -n1 -r -p "Kapatmak için bir tuşa bas…"
+  echo "ERROR: the app exited with an error."
+  echo "    Full log: $(pwd)/$LOG"
+  read -n1 -r -p "Press any key to close…"
   exit 1
 fi

@@ -1,13 +1,13 @@
 @echo off
-REM Windows launcher — double-click this file to start the app.
-REM On first run it builds a local Python venv and installs PySide6 + dependencies.
+REM Windows launcher — double-click to start Russian Vocab Studio.
+REM Builds a local Python venv and installs PySide6 + dependencies on first run.
 chcp 65001 > nul
 setlocal enabledelayedexpansion
 
 cd /d "%~dp0"
 
 echo --------------------------------------------------
-echo   Rusca Kelime Studyosu — launcher
+echo   Russian Vocab Studio — launcher
 echo   %DATE% %TIME%
 echo   Folder: %CD%
 echo --------------------------------------------------
@@ -29,44 +29,44 @@ for %%P in (python python3 py) do (
 
 if "%PY%"=="" (
     echo.
-    echo HATA: Python bulunamadi.
+    echo ERROR: Python not found.
     echo.
-    echo Cozum: https://www.python.org/downloads/windows/
-    echo Python 3.12 indir, kur. Kurulumda
-    echo      "Add Python to PATH" kutucugunu MUTLAKA isaretle.
+    echo Fix: install Python 3.12 from https://www.python.org/downloads/windows/
+    echo During installation MAKE SURE you tick:
+    echo      [x] Add Python to PATH
     echo.
-    echo Sonra bu dosyaya tekrar cift tikla.
+    echo Then double-click this file again.
     echo.
     pause
     exit /b 1
 )
 
-echo - Python kullaniliyor: %PY%
+echo - Using Python: %PY%
 %PY% --version
 
 set VENV=.venv
 set VENV_PY=%VENV%\Scripts\python.exe
 
 if not exist "%VENV_PY%" (
-    echo Virtualenv olusturuluyor (.venv)...
+    echo Creating virtualenv (.venv)...
     %PY% -m venv "%VENV%"
     if errorlevel 1 (
-        echo HATA: venv olusturulamadi.
+        echo ERROR: failed to create virtualenv.
         pause
         exit /b 1
     )
 )
 
-echo Bagimliliklar kontrol ediliyor (ilk acilis 3-5 dk surebilir)...
+echo Checking dependencies (first run can take 3-5 minutes)...
 "%VENV_PY%" -m pip install --upgrade pip --quiet
 "%VENV_PY%" -m pip install -r requirements.txt --quiet
 if errorlevel 1 (
-    echo HATA: Bagimliliklar kurulamadi. Yukaridaki mesajlari oku.
+    echo ERROR: failed to install dependencies. See messages above.
     pause
     exit /b 1
 )
 
-echo Uygulama baslatiliyor...
+echo Launching app...
 echo --------------------------------------------------
 echo.
 
@@ -74,7 +74,7 @@ echo.
 if errorlevel 1 (
     echo.
     echo --------------------------------------------------
-    echo HATA: Uygulama hatayla kapandi.
+    echo ERROR: the app exited with an error.
     pause
     exit /b 1
 )
