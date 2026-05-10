@@ -1,0 +1,107 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:        # also allow manual runs from the Actions tab
+
+permissions:
+  contents: write           # needed to upload to a Release
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────
+  # Windows .exe
+  # ──────────────────────────────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Windows .exe
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --windowed `
+            --name RussianVocabStudio `
+            --collect-data pymorphy3_dicts_ru `
+            --hidden-import pymorphy3.opencorpora_dict `
+            app.py
+
+      - name: Package as zip
+        shell: pwsh
+        run: |
+          cd dist
+          Compress-Archive -Path RussianVocabStudio -DestinationPath ../RussianVocabStudio-Windows.zip -Force
+
+      - name: Upload artifact (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: RussianVocabStudio-Windows
+          path: RussianVocabStudio-Windows.zip
+
+      - name: Attach to GitHub Release (only on tag push)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: RussianVocabStudio-Windows.zip
+          generate_release_notes: true
+
+  # ──────────────────────────────────────────────────────────────────────
+  # macOS .app  (Apple Silicon)
+  # ──────────────────────────────────────────────────────────────────────
+  build-macos:
+    runs-on: macos-latest        # arm64 by default; covers M1/M2/M3 Macs
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build macOS .app
+        run: |
+          pyinstaller --noconfirm --clean --windowed \
+            --name RussianVocabStudio \
+            --osx-bundle-identifier com.arslnonr.russianvocabstudio \
+            --collect-data pymorphy3_dicts_ru \
+            --hidden-import pymorphy3.opencorpora_dict \
+            app.py
+
+      - name: Strip quarantine + zip the .app
+        run: |
+          xattr -cr dist/RussianVocabStudio.app
+          cd dist
+          ditto -c -k --keepParent RussianVocabStudio.app ../RussianVocabStudio-macOS.zip
+
+      - name: Upload artifact (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: RussianVocabStudio-macOS
+          path: RussianVocabStudio-macOS.zip
+
+      - name: Attach to GitHub Release (only on tag push)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: RussianVocabStudio-macOS.zip
+          generate_release_notes: true
