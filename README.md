@@ -34,6 +34,12 @@ Download the latest release for your OS from the [**Releases**](../../releases) 
 
 No Python install needed.
 
+> **macOS:** the first time you open the app, macOS may say *"Apple could not verify that RussianVocabStudio is free of malware…"*. This is the standard Gatekeeper warning shown for any open‑source app that hasn't paid Apple's $99/year notarization fee. Fix it once with:
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/RussianVocabStudio.app
+> ```
+> Or via *System Settings → Privacy & Security → "Open Anyway"*. After that the app opens normally forever.
+
 ### Option 2 — from source
 
 ```bash
