@@ -363,7 +363,8 @@ class DropZone(QFrame):
 
 class ExtractWorker(QThread):
     progress = Signal(float)
-    finished_ok = Signal(object)   # ExtractResult
+    stage = Signal(str)              # 'ocr_init', 'ocr_running', etc.
+    finished_ok = Signal(object)     # ExtractResult
     failed = Signal(str)
     cancelled = Signal()
 
@@ -377,14 +378,17 @@ class ExtractWorker(QThread):
 
     def run(self) -> None:
         try:
-            def cb(p: float, _msg: str) -> None:
-                self.progress.emit(p)
+            def cb(p: float, msg: str) -> None:
+                if p < 0:
+                    # Negative progress is used as a side-channel for stage names.
+                    self.stage.emit(msg)
+                else:
+                    self.progress.emit(p)
             result = extract(self.opts, on_progress=cb, cancel=self.cancel_event)
             self.finished_ok.emit(result)
         except Cancelled:
             self.cancelled.emit()
         except ExtractError as e:
-            # Caller will translate the key — we send it raw.
             self.failed.emit(f"__KEY__:{e.key}:{repr(e.fmt)}")
         except Exception as e:
             tb = traceback.format_exc(limit=2)
@@ -1055,10 +1059,23 @@ class MainWindow(QMainWindow):
 
         self._worker = ExtractWorker(opts)
         self._worker.progress.connect(lambda p: self.progress.setValue(int(p * 1000)))
+        self._worker.stage.connect(self._on_stage)
         self._worker.finished_ok.connect(self._on_extract_done)
         self._worker.failed.connect(self._on_extract_error)
         self._worker.cancelled.connect(self._on_extract_cancelled)
         self._worker.start()
+
+    def _on_stage(self, stage: str) -> None:
+        """Update status chip + log when the extractor signals a phase change."""
+        key_map = {
+            "ocr_init": "status_ocr_init",
+            "ocr_running": "status_ocr_running",
+        }
+        key = key_map.get(stage)
+        if key:
+            text = self.i18n.t(key)
+            self._set_status(text, state="working")
+            self._set_log(text, state="info")
 
     def _on_cancel_clicked(self) -> None:
         if self._worker is None:
@@ -1071,7 +1088,17 @@ class MainWindow(QMainWindow):
         self._set_status(self.i18n.t("status_done"), state="done")
         self.progress.setValue(1000)
         if not result.rows:
-            self._set_log(self.i18n.t("msg_no_words"), state="error")
+            # Be specific about WHY: the most useful signal is whether the PDF
+            # had any Cyrillic text at all.
+            if result.cyrillic_chars == 0:
+                key = "msg_no_cyrillic"
+            elif result.raw_tokens == 0:
+                # Cyrillic chars exist but no 2+ letter words — odd encoding.
+                key = "msg_no_tokens"
+            else:
+                # Words existed but were filtered out entirely.
+                key = "msg_all_filtered"
+            self._set_log(self.i18n.t(key), state="error")
             return
         primary = result.output_paths[0] if result.output_paths else self._csv_path
         self._set_log(

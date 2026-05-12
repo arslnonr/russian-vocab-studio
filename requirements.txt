@@ -3,7 +3,8 @@ pymupdf>=1.24.0
 pymorphy3>=2.0.2
 pymorphy3-dicts-ru>=2.4.417150.4580142
 
-# Optional — only needed for OCR on scanned PDFs.
-# easyocr>=1.7.2          # heavy (~PyTorch, ~2 GB on first run)
-# pytesseract>=0.3.10     # lighter; needs system 'tesseract' + Russian pack
-# pillow>=10.0.0
+# OCR — bundled by default so scanned PDFs work out of the box.
+# First OCR call downloads ~200 MB of Russian/English models automatically.
+easyocr>=1.7.2
+pillow>=10.0.0
+numpy>=1.26.0

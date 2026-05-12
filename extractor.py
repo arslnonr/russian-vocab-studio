@@ -116,6 +116,8 @@ class ExtractResult:
     total_tokens: int
     pages_processed: int
     output_paths: list[Path]
+    cyrillic_chars: int = 0      # raw Cyrillic chars seen in the PDF text
+    raw_tokens: int = 0          # tokens before any filtering
 
 
 class ExtractError(Exception):
@@ -161,15 +163,18 @@ def _has_usable_text_layer(text: str) -> bool:
 _easyocr_reader = None
 
 
-def _get_easyocr():
+def _get_easyocr(on_progress: "ProgressCb | None" = None):
     global _easyocr_reader
     if _easyocr_reader is None:
+        if on_progress is not None:
+            # Signal to UI: first-time model download / initialisation.
+            on_progress(-1.0, "ocr_init")
         import easyocr  # type: ignore
         _easyocr_reader = easyocr.Reader(["ru", "en"], gpu=False)
     return _easyocr_reader
 
 
-def _ocr_page(page, dpi: int) -> str:
+def _ocr_page(page, dpi: int, on_progress: "ProgressCb | None" = None) -> str:
     try:
         pix = page.get_pixmap(dpi=dpi, alpha=False)
         png_bytes = pix.tobytes("png")
@@ -181,8 +186,10 @@ def _ocr_page(page, dpi: int) -> str:
         import numpy as np  # type: ignore
         from PIL import Image  # type: ignore
 
-        reader = _get_easyocr()
+        reader = _get_easyocr(on_progress)
         img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+        if on_progress is not None:
+            on_progress(-2.0, "ocr_running")
         return "\n".join(reader.readtext(np.array(img), detail=0, paragraph=True))
     except ImportError:
         pass
@@ -221,7 +228,7 @@ def _read_pdf_text(opts: ExtractOptions, on_progress: ProgressCb,
             if opts.reading_mode == "ocr" or (
                 opts.reading_mode == "auto" and not _has_usable_text_layer(text)
             ):
-                ocr = _ocr_page(page, opts.ocr_dpi)
+                ocr = _ocr_page(page, opts.ocr_dpi, on_progress)
                 if ocr:
                     text = ocr
 
@@ -285,6 +292,8 @@ def extract(opts: ExtractOptions,
 
     progress(0.6, "tokenize")
     _check_cancel(cancel)
+    cyrillic_chars_seen = len(_CYRILLIC_ANY_RE.findall(text))
+    raw_tokens = sum(1 for _ in _CYRILLIC_TOKEN_RE.finditer(text))
     tokens = _tokenize(text, opts.min_length)
 
     excluded = _load_custom_exclude(opts.custom_exclude_path)
@@ -349,6 +358,8 @@ def extract(opts: ExtractOptions,
         total_tokens=len(tokens),
         pages_processed=pages,
         output_paths=output_paths,
+        cyrillic_chars=cyrillic_chars_seen,
+        raw_tokens=raw_tokens,
     )
 
 
@@ -358,14 +369,26 @@ def extract(opts: ExtractOptions,
 
 
 def _write_csv(path: Path, rows: Iterable[WordRow], opts: ExtractOptions) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        raise ExtractError("msg_csv_perm_denied", path=str(path))
+
     headers = ["lemma"]
     if opts.include_pos:
         headers.append("pos")
     if opts.include_frequency:
         headers.append("frequency")
 
-    with path.open("w", encoding="utf-8-sig", newline="") as fh:
+    try:
+        fh = path.open("w", encoding="utf-8-sig", newline="")
+    except PermissionError:
+        # Most common cause on Windows: the file is open in Excel.
+        raise ExtractError("msg_csv_locked", path=str(path))
+    except OSError as e:
+        raise ExtractError("msg_csv_write_failed", path=str(path), err=str(e))
+
+    try:
         writer = csv.writer(fh)
         if opts.include_header:
             writer.writerow(headers)
@@ -376,6 +399,8 @@ def _write_csv(path: Path, rows: Iterable[WordRow], opts: ExtractOptions) -> Pat
             if opts.include_frequency:
                 row.append(r.frequency)
             writer.writerow(row)
+    finally:
+        fh.close()
     return path
 
 

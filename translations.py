@@ -11,6 +11,8 @@ TRANSLATIONS = {
 
         "status_ready": "Hazır",
         "status_working": "İşleniyor…",
+        "status_ocr_init": "OCR modeli indiriliyor (ilk seferde ~200 MB)…",
+        "status_ocr_running": "OCR çalışıyor…",
         "status_done": "Tamamlandı",
         "status_error": "Hata",
 
@@ -63,10 +65,16 @@ TRANSLATIONS = {
         "msg_done": "{n} kelime çıkarıldı → {path}",
         "msg_error": "Bir hata oluştu: {err}",
         "msg_no_words": "Bu PDF'den çıkarılacak kelime bulunamadı.",
+        "msg_no_cyrillic": "PDF'de Kiril metni bulunamadı — büyük olasılıkla taranmış görüntü PDF'i (metin katmanı yok).\n\nÇözüm: PDF'i önceden OCR'lat (ör. ilovepdf.com/ocr-pdf veya Adobe Acrobat) ve OCR'lı versiyonu tekrar yükle. Ya da “Okuma Modu → OCR”u dene (EasyOCR / Tesseract kurulu olmalı).",
+        "msg_no_tokens": "PDF'de Kiril karakterleri var ama tanınabilir kelime çıkarılamadı (alışılmadık karakter kodlaması olabilir).",
+        "msg_all_filtered": "Kelimeler bulundu ama hepsi filtreler tarafından elendi. “Min. tekrar”ı 1'e indirmeyi veya “Temel kelimeleri çıkar” seçeneğini kapatmayı dene.",
         "msg_pymorphy_missing": "Rusça analiz için 'pymorphy3' kurulu değil. Kurmak için: pip install pymorphy3",
         "msg_pymupdf_missing": "PDF okuma için 'pymupdf' kurulu değil. Kurmak için: pip install pymupdf",
         "msg_custom_exclude_missing": "Özel exclude dosyası bulunamadı: {path}",
         "msg_cancelled": "İşlem iptal edildi.",
+        "msg_csv_locked": "CSV dosyası başka bir programda açık görünüyor (büyük ihtimalle Excel). Lütfen dosyayı kapat veya farklı bir kayıt yolu seç, sonra tekrar dene.\n\nDosya: {path}",
+        "msg_csv_perm_denied": "Bu konuma yazma izni yok. Lütfen farklı bir kayıt yolu seç.\n\nDosya: {path}",
+        "msg_csv_write_failed": "CSV yazılamadı: {err}\n\nDosya: {path}",
 
         "dlg_pdf_title": "PDF Seç",
         "dlg_csv_title": "CSV'yi nereye kaydedeyim?",
@@ -98,6 +106,8 @@ TRANSLATIONS = {
 
         "status_ready": "Готово",
         "status_working": "Обработка…",
+        "status_ocr_init": "Загрузка OCR‑моделей (первый раз ~200 МБ)…",
+        "status_ocr_running": "OCR обрабатывает…",
         "status_done": "Завершено",
         "status_error": "Ошибка",
 
@@ -154,6 +164,9 @@ TRANSLATIONS = {
         "msg_pymupdf_missing": "Нужен 'pymupdf'. Установите: pip install pymupdf",
         "msg_custom_exclude_missing": "Файл исключений не найден: {path}",
         "msg_cancelled": "Отменено.",
+        "msg_csv_locked": "Похоже, CSV‑файл открыт в другой программе (скорее всего, в Excel). Закройте файл или выберите другой путь сохранения и попробуйте снова.\n\nФайл: {path}",
+        "msg_csv_perm_denied": "Нет прав на запись в это место. Выберите другой путь сохранения.\n\nФайл: {path}",
+        "msg_csv_write_failed": "Не удалось записать CSV: {err}\n\nФайл: {path}",
 
         "dlg_pdf_title": "Выбрать PDF",
         "dlg_csv_title": "Куда сохранить CSV?",
@@ -185,6 +198,8 @@ TRANSLATIONS = {
 
         "status_ready": "Ready",
         "status_working": "Working…",
+        "status_ocr_init": "Downloading OCR models (~200 MB the first time)…",
+        "status_ocr_running": "Running OCR…",
         "status_done": "Done",
         "status_error": "Error",
 
@@ -241,6 +256,9 @@ TRANSLATIONS = {
         "msg_pymupdf_missing": "'pymupdf' is required. Install it with: pip install pymupdf",
         "msg_custom_exclude_missing": "Custom exclude file not found: {path}",
         "msg_cancelled": "Extraction cancelled.",
+        "msg_csv_locked": "The CSV file appears to be open in another program (most likely Excel). Please close it or pick a different save path and try again.\n\nFile: {path}",
+        "msg_csv_perm_denied": "No permission to write to that location. Please pick a different save path.\n\nFile: {path}",
+        "msg_csv_write_failed": "Could not write CSV: {err}\n\nFile: {path}",
 
         "dlg_pdf_title": "Select a PDF",
         "dlg_csv_title": "Save CSV as…",
