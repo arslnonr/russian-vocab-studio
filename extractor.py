@@ -100,7 +100,8 @@ class ExtractOptions:
     include_header: bool = True
     export_mode: str = "single_csv"
     reading_mode: str = "auto"
-    ocr_dpi: int = 220
+    ocr_dpi: int = 150                # 150 is enough for printed text and 2x faster than 220
+    save_searchable_pdf: bool = True  # write a *_searchable.pdf alongside the CSV when OCR runs
 
 
 @dataclass
@@ -118,6 +119,8 @@ class ExtractResult:
     output_paths: list[Path]
     cyrillic_chars: int = 0      # raw Cyrillic chars seen in the PDF text
     raw_tokens: int = 0          # tokens before any filtering
+    searchable_pdf_path: Path | None = None
+    ocr_device: str = "cpu"      # which device EasyOCR ran on (cpu / cuda / mps)
 
 
 class ExtractError(Exception):
@@ -161,26 +164,80 @@ def _has_usable_text_layer(text: str) -> bool:
 
 
 _easyocr_reader = None
+_easyocr_device: str = "cpu"
+
+
+def _detect_torch_device() -> str:
+    """Pick fastest available torch device: cuda > mps > cpu."""
+    try:
+        import torch  # type: ignore
+    except ImportError:
+        return "cpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def _get_easyocr(on_progress: "ProgressCb | None" = None):
-    global _easyocr_reader
-    if _easyocr_reader is None:
-        if on_progress is not None:
-            # Signal to UI: first-time model download / initialisation.
-            on_progress(-1.0, "ocr_init")
-        import easyocr  # type: ignore
-        _easyocr_reader = easyocr.Reader(["ru", "en"], gpu=False)
+    """Create / cache an EasyOCR reader on the fastest available device."""
+    global _easyocr_reader, _easyocr_device
+    if _easyocr_reader is not None:
+        return _easyocr_reader
+
+    if on_progress is not None:
+        on_progress(-1.0, "ocr_init")
+
+    import easyocr  # type: ignore
+
+    device = _detect_torch_device()
+    _easyocr_device = device
+
+    if device == "cuda":
+        # EasyOCR honours gpu=True for CUDA.
+        _easyocr_reader = easyocr.Reader(["ru", "en"], gpu=True, verbose=False)
+    elif device == "mps":
+        # EasyOCR doesn't natively support MPS — load on CPU then move the
+        # networks to MPS for ~5-10× speed-up on Apple Silicon.
+        _easyocr_reader = easyocr.Reader(["ru", "en"], gpu=False, verbose=False)
+        try:
+            import torch  # type: ignore
+            mps = torch.device("mps")
+            if hasattr(_easyocr_reader, "detector") and _easyocr_reader.detector is not None:
+                _easyocr_reader.detector = _easyocr_reader.detector.to(mps)
+            if hasattr(_easyocr_reader, "recognizer") and _easyocr_reader.recognizer is not None:
+                _easyocr_reader.recognizer = _easyocr_reader.recognizer.to(mps)
+            _easyocr_reader.device = mps
+        except Exception:
+            _easyocr_device = "cpu"
+    else:
+        _easyocr_reader = easyocr.Reader(["ru", "en"], gpu=False, verbose=False)
+
     return _easyocr_reader
 
 
-def _ocr_page(page, dpi: int, on_progress: "ProgressCb | None" = None) -> str:
+def current_ocr_device() -> str:
+    return _easyocr_device
+
+
+def _ocr_page(page, dpi: int,
+              on_progress: "ProgressCb | None" = None,
+              ) -> tuple[str, list[tuple[list, str, float]], tuple[int, int]]:
+    """
+    Return (text, raw_results, (img_width, img_height)) for one page.
+
+    raw_results is the list of (bbox, text, confidence) tuples — used later
+    to build a searchable PDF. Empty list if OCR didn't run.
+    """
     try:
         pix = page.get_pixmap(dpi=dpi, alpha=False)
         png_bytes = pix.tobytes("png")
+        img_size = (pix.width, pix.height)
     except Exception:
-        return ""
+        return "", [], (0, 0)
 
+    # EasyOCR (preferred, GPU-accelerated)
     try:
         import easyocr  # type: ignore  # noqa: F401
         import numpy as np  # type: ignore
@@ -190,24 +247,37 @@ def _ocr_page(page, dpi: int, on_progress: "ProgressCb | None" = None) -> str:
         img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
         if on_progress is not None:
             on_progress(-2.0, "ocr_running")
-        return "\n".join(reader.readtext(np.array(img), detail=0, paragraph=True))
+        results = reader.readtext(np.array(img), detail=1, paragraph=False)
+        # results: list of (bbox, text, conf)
+        text = "\n".join(r[1] for r in results if r and len(r) >= 2)
+        return text, results, img_size
     except ImportError:
         pass
     except Exception:
         pass
 
+    # Tesseract fallback
     try:
         import pytesseract  # type: ignore
         from PIL import Image  # type: ignore
 
         img = Image.open(io.BytesIO(png_bytes))
-        return pytesseract.image_to_string(img, lang="rus")
+        return pytesseract.image_to_string(img, lang="rus"), [], img_size
     except Exception:
-        return ""
+        return "", [], img_size
 
 
 def _read_pdf_text(opts: ExtractOptions, on_progress: ProgressCb,
-                   cancel: threading.Event | None) -> tuple[str, int]:
+                   cancel: threading.Event | None
+                   ) -> tuple[str, int, dict[int, tuple[list, tuple[int, int]]]]:
+    """
+    Read every requested page. For each page that goes through OCR, we keep
+    the raw `(bbox, text, confidence)` list and the rasterised image size so
+    that we can later build a searchable PDF.
+
+    Returns: (concatenated_text, pages_processed, per_page_ocr_data)
+        per_page_ocr_data[page_index] = (results, (img_w, img_h))
+    """
     assert fitz is not None
     doc = fitz.open(opts.pdf_path)
     try:
@@ -218,6 +288,9 @@ def _read_pdf_text(opts: ExtractOptions, on_progress: ProgressCb,
             end = start + 1
 
         chunks: list[str] = []
+        ocr_pages: dict[int, tuple[list, tuple[int, int]]] = {}
+        pages_total = end - start
+
         for i in range(start, end):
             _check_cancel(cancel)
             page = doc.load_page(i)
@@ -225,18 +298,25 @@ def _read_pdf_text(opts: ExtractOptions, on_progress: ProgressCb,
             if opts.reading_mode in ("auto", "text"):
                 text = page.get_text("text") or ""
 
-            if opts.reading_mode == "ocr" or (
-                opts.reading_mode == "auto" and not _has_usable_text_layer(text)
-            ):
-                ocr = _ocr_page(page, opts.ocr_dpi, on_progress)
-                if ocr:
-                    text = ocr
+            need_ocr = (
+                opts.reading_mode == "ocr"
+                or (opts.reading_mode == "auto" and not _has_usable_text_layer(text))
+            )
+
+            if need_ocr:
+                # Tell UI which page we're OCRing.
+                on_progress(-3.0, f"ocr_page:{i - start + 1}/{pages_total}")
+                ocr_text, ocr_results, img_size = _ocr_page(page, opts.ocr_dpi, on_progress)
+                if ocr_text:
+                    text = ocr_text
+                if ocr_results:
+                    ocr_pages[i] = (ocr_results, img_size)
 
             chunks.append(text)
-            done = (i - start + 1) / max(1, end - start)
+            done = (i - start + 1) / max(1, pages_total)
             on_progress(0.05 + done * 0.5, f"page {i + 1}/{end}")
 
-        return "\n".join(chunks), end - start
+        return "\n".join(chunks), pages_total, ocr_pages
     finally:
         doc.close()
 
@@ -288,7 +368,7 @@ def extract(opts: ExtractOptions,
     _check_deps()
 
     progress(0.02, "init")
-    text, pages = _read_pdf_text(opts, progress, cancel)
+    text, pages, ocr_pages = _read_pdf_text(opts, progress, cancel)
 
     progress(0.6, "tokenize")
     _check_cancel(cancel)
@@ -349,8 +429,20 @@ def extract(opts: ExtractOptions,
     else:
         rows.sort(key=lambda r: (-r.frequency, cyrillic_sort_key(r.lemma)))
 
-    progress(0.96, "write csv")
+    progress(0.94, "write csv")
     output_paths = _write_outputs(rows, opts)
+
+    # Build a searchable PDF if requested AND OCR actually ran.
+    searchable_path: Path | None = None
+    if opts.save_searchable_pdf and ocr_pages:
+        progress(0.97, "searchable_pdf")
+        on_progress(-4.0, "searchable_pdf")
+        try:
+            searchable_path = _save_searchable_pdf(opts.pdf_path, ocr_pages, opts)
+        except Exception:
+            # Don't fail the whole extraction over the PDF rebuild
+            searchable_path = None
+
     progress(1.0, "done")
 
     return ExtractResult(
@@ -360,7 +452,85 @@ def extract(opts: ExtractOptions,
         output_paths=output_paths,
         cyrillic_chars=cyrillic_chars_seen,
         raw_tokens=raw_tokens,
+        searchable_pdf_path=searchable_path,
+        ocr_device=current_ocr_device() if ocr_pages else "cpu",
     )
+
+
+def _save_searchable_pdf(
+    src_pdf: Path,
+    ocr_pages: dict[int, tuple[list, tuple[int, int]]],
+    opts: ExtractOptions,
+) -> Path:
+    """
+    Re-open the original PDF and overlay invisible text on every OCRd page so
+    the result is selectable / searchable. Writes <stem>_searchable.pdf next
+    to the CSV output.
+    """
+    assert fitz is not None
+
+    out_path = opts.csv_path.with_name(f"{opts.csv_path.stem}_searchable.pdf")
+    if out_path.suffix.lower() != ".pdf":
+        out_path = out_path.with_suffix(".pdf")
+
+    doc = fitz.open(src_pdf)
+    try:
+        for page_idx, (results, (img_w, img_h)) in ocr_pages.items():
+            page = doc.load_page(page_idx)
+            pw, ph = page.rect.width, page.rect.height
+            if img_w == 0 or img_h == 0:
+                continue
+            sx = pw / img_w
+            sy = ph / img_h
+
+            for entry in results:
+                if not entry or len(entry) < 2:
+                    continue
+                bbox, text = entry[0], entry[1]
+                if not text or not str(text).strip():
+                    continue
+                try:
+                    xs = [p[0] for p in bbox]
+                    ys = [p[1] for p in bbox]
+                except (TypeError, IndexError):
+                    continue
+                x0, x1 = min(xs) * sx, max(xs) * sx
+                y0, y1 = min(ys) * sy, max(ys) * sy
+                rect = fitz.Rect(x0, y0, x1, y1)
+                if rect.is_empty or rect.is_infinite:
+                    continue
+                # Pick a font size that fills the box height.
+                box_h = max(1.0, y1 - y0)
+                font_size = max(4.0, box_h * 0.85)
+                try:
+                    page.insert_textbox(
+                        rect,
+                        str(text),
+                        fontsize=font_size,
+                        fontname="helv",
+                        color=(0, 0, 0),
+                        render_mode=3,        # invisible — selectable but not drawn
+                        align=0,
+                    )
+                except Exception:
+                    # Some fonts/encodings reject Cyrillic via insert_textbox;
+                    # fall back to a single insert_text call which is more lenient.
+                    try:
+                        page.insert_text(
+                            (rect.x0, rect.y0 + font_size),
+                            str(text),
+                            fontsize=font_size,
+                            color=(0, 0, 0),
+                            render_mode=3,
+                        )
+                    except Exception:
+                        pass
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        doc.save(out_path, garbage=4, deflate=True)
+    finally:
+        doc.close()
+    return out_path
 
 
 # --------------------------------------------------------------------------- #

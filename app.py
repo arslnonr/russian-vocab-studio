@@ -1067,9 +1067,18 @@ class MainWindow(QMainWindow):
 
     def _on_stage(self, stage: str) -> None:
         """Update status chip + log when the extractor signals a phase change."""
+        if stage.startswith("ocr_page:"):
+            # 'ocr_page:3/12'
+            pos = stage.split(":", 1)[1]
+            text = self.i18n.t("status_ocr_page", pos=pos)
+            self._set_status(self.i18n.t("status_ocr_running"), state="working")
+            self._set_log(text, state="info")
+            return
+
         key_map = {
             "ocr_init": "status_ocr_init",
             "ocr_running": "status_ocr_running",
+            "searchable_pdf": "status_searchable_pdf",
         }
         key = key_map.get(stage)
         if key:
@@ -1101,10 +1110,12 @@ class MainWindow(QMainWindow):
             self._set_log(self.i18n.t(key), state="error")
             return
         primary = result.output_paths[0] if result.output_paths else self._csv_path
-        self._set_log(
-            self.i18n.t("msg_done", n=len(result.rows), path=str(primary)),
-            state="success",
-        )
+        msg = self.i18n.t("msg_done", n=len(result.rows), path=str(primary))
+        if result.searchable_pdf_path is not None:
+            msg += "\n" + self.i18n.t(
+                "msg_searchable_pdf_done", path=str(result.searchable_pdf_path)
+            )
+        self._set_log(msg, state="success")
 
     def _on_extract_cancelled(self) -> None:
         self._reset_action_state()

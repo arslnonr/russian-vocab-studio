@@ -11,8 +11,11 @@ TRANSLATIONS = {
 
         "status_ready": "Hazır",
         "status_working": "İşleniyor…",
-        "status_ocr_init": "OCR modeli indiriliyor (ilk seferde ~200 MB)…",
+        "status_ocr_init": "OCR modeli yükleniyor (ilk seferde ~200 MB iniyor)…",
         "status_ocr_running": "OCR çalışıyor…",
+        "status_ocr_page": "OCR — sayfa {pos}",
+        "status_searchable_pdf": "Aranabilir PDF oluşturuluyor…",
+        "msg_searchable_pdf_done": "Aranabilir PDF: {path}",
         "status_done": "Tamamlandı",
         "status_error": "Hata",
 
@@ -108,6 +111,9 @@ TRANSLATIONS = {
         "status_working": "Обработка…",
         "status_ocr_init": "Загрузка OCR‑моделей (первый раз ~200 МБ)…",
         "status_ocr_running": "OCR обрабатывает…",
+        "status_ocr_page": "OCR — стр. {pos}",
+        "status_searchable_pdf": "Создаём PDF с текстовым слоем…",
+        "msg_searchable_pdf_done": "PDF с поиском: {path}",
         "status_done": "Завершено",
         "status_error": "Ошибка",
 
@@ -198,8 +204,11 @@ TRANSLATIONS = {
 
         "status_ready": "Ready",
         "status_working": "Working…",
-        "status_ocr_init": "Downloading OCR models (~200 MB the first time)…",
+        "status_ocr_init": "Loading OCR models (~200 MB on first run)…",
         "status_ocr_running": "Running OCR…",
+        "status_ocr_page": "OCR — page {pos}",
+        "status_searchable_pdf": "Building searchable PDF…",
+        "msg_searchable_pdf_done": "Searchable PDF: {path}",
         "status_done": "Done",
         "status_error": "Error",
 
