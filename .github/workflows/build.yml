@@ -42,6 +42,7 @@ jobs:
             --name RussianVocabStudio `
             --collect-data pymorphy3_dicts_ru `
             --hidden-import pymorphy3.opencorpora_dict `
+            --collect-all docx `
             --collect-all easyocr `
             --collect-all torch `
             --collect-all torchvision `
@@ -94,6 +95,7 @@ jobs:
             --osx-bundle-identifier com.arslnonr.russianvocabstudio \
             --collect-data pymorphy3_dicts_ru \
             --hidden-import pymorphy3.opencorpora_dict \
+            --collect-all docx \
             --collect-all easyocr \
             --collect-all torch \
             --collect-all torchvision \

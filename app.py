@@ -404,7 +404,7 @@ class MainWindow(QMainWindow):
     POS_KEYS = ("noun", "verb", "adj", "adv", "other")
     READING_KEYS = ("auto", "text", "ocr")
     SORT_KEYS = ("frequency", "alpha")
-    EXPORT_KEYS = ("single_csv", "separate_by_pos", "both")
+    EXPORT_KEYS = ("single_file", "separate_by_pos", "both")
 
     def __init__(self):
         super().__init__()
@@ -745,7 +745,7 @@ class MainWindow(QMainWindow):
         row.setSpacing(8)
 
         self.csv_edit = QLineEdit()
-        self.csv_edit.setPlaceholderText("…/words.csv")
+        self.csv_edit.setPlaceholderText("…/words.csv or .docx")
         row.addWidget(self.csv_edit, 1)
 
         self.csv_btn = QPushButton("…")
@@ -861,7 +861,7 @@ class MainWindow(QMainWindow):
 
         # Export combo (now lives in the Output card)
         self.lbl_export.setText(t("export_mode"))
-        prev_export = self.export_combo.currentData() or "single_csv"
+        prev_export = self.export_combo.currentData() or "single_file"
         self.export_combo.blockSignals(True)
         self.export_combo.clear()
         for k, lab in zip(self.EXPORT_KEYS, ("export_single", "export_separate", "export_both")):
@@ -881,6 +881,7 @@ class MainWindow(QMainWindow):
         self.exclude_clear_btn.setText(t("exclude_clear"))
 
         self.output_card_title.setText(t("output_card_title"))
+        self.csv_edit.setPlaceholderText(t("output_placeholder"))
         self.open_folder_btn.setText(t("output_open_folder"))
 
         self.action_btn.setText(t("action_extract"))
@@ -936,7 +937,7 @@ class MainWindow(QMainWindow):
             self._page_count = 0
 
         if not self.csv_edit.text().strip():
-            self.csv_edit.setText(str(path.with_suffix(".csv")))
+            self.csv_edit.setText(str(self._suggest_output_path(path)))
 
         if self._page_count:
             self.start_spin.setRange(1, self._page_count)
@@ -961,13 +962,24 @@ class MainWindow(QMainWindow):
     def _pick_csv(self) -> None:
         suggested = ""
         if self._pdf_path:
-            suggested = str(self._pdf_path.with_suffix(".csv"))
-        path, _ = QFileDialog.getSaveFileName(
-            self, self.i18n.t("dlg_csv_title"), suggested,
-            self.i18n.t("dlg_csv_filter"),
+            suggested = str(self._suggest_output_path(self._pdf_path))
+        elif self.csv_edit.text().strip():
+            suggested = self.csv_edit.text().strip()
+
+        selected_filter = (
+            self.i18n.t("dlg_output_docx_filter")
+            if self._current_output_suffix() == ".docx"
+            else self.i18n.t("dlg_output_csv_filter")
+        )
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            self.i18n.t("dlg_output_title"),
+            suggested,
+            self.i18n.t("dlg_output_filter"),
+            selected_filter,
         )
         if path:
-            self.csv_edit.setText(path)
+            self.csv_edit.setText(self._normalize_output_path(path, selected_filter))
 
     def _pick_exclude(self) -> None:
         if self._worker is not None and self._worker.isRunning():
@@ -1009,7 +1021,7 @@ class MainWindow(QMainWindow):
                                     self.i18n.t("msg_select_pdf"))
             return None
 
-        csv_path_str = self.csv_edit.text().strip() or str(self._pdf_path.with_suffix(".csv"))
+        csv_path_str = self.csv_edit.text().strip() or str(self._suggest_output_path(self._pdf_path))
         csv_path = Path(csv_path_str).expanduser()
 
         if self.all_pages_chk.isChecked():
@@ -1037,9 +1049,28 @@ class MainWindow(QMainWindow):
             sort_by=self.sort_combo.currentData() or "frequency",
             include_frequency=self.chk_inc_freq.isChecked(),
             include_pos=self.chk_inc_pos.isChecked(),
-            export_mode=self.export_combo.currentData() or "single_csv",
+            export_mode=self.export_combo.currentData() or "single_file",
             reading_mode=self.reading_combo.currentData() or "auto",
         )
+
+    def _current_output_suffix(self) -> str:
+        output_text = self.csv_edit.text().strip()
+        if not output_text:
+            return ".csv"
+        suffix = Path(output_text).suffix.lower()
+        if suffix in {".csv", ".docx"}:
+            return suffix
+        return ".csv"
+
+    def _suggest_output_path(self, pdf_path: Path) -> Path:
+        return pdf_path.with_suffix(self._current_output_suffix())
+
+    def _normalize_output_path(self, raw_path: str, selected_filter: str) -> str:
+        path = Path(raw_path)
+        if path.suffix.lower() in {".csv", ".docx"}:
+            return str(path)
+        suffix = ".docx" if "docx" in selected_filter.lower() else ".csv"
+        return str(path.with_suffix(suffix))
 
     def _on_extract_clicked(self) -> None:
         if self._worker is not None and self._worker.isRunning():
