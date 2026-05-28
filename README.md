@@ -1,6 +1,6 @@
 # Russian Vocab Studio
 
-Extract Russian vocabulary from any PDF, lemmatized and frequency‑counted, exported as a clean CSV ready for Anki, Excel, or your own scripts.
+Extract Russian vocabulary from any PDF, lemmatized and frequency‑counted, exported as a clean CSV or Word document ready for Anki, Excel, class handouts, or your own scripts.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org)
@@ -17,7 +17,7 @@ UI in **Türkçe · Русский · English** — switch instantly from the to
 - **Smart filters** — drop proper nouns, drop the 100 most basic Russian words, set min word length and min frequency
 - **Custom exclude list** — feed it a `.txt` of lemmas you already know
 - **Sort** by descending frequency or proper Cyrillic alphabetical order
-- **Export modes** — single CSV, one CSV per part of speech, or both
+- **Export modes** — single CSV/Word file, one file per part of speech, or both
 - **Auto OCR** — falls back to OCR (EasyOCR or Tesseract, optional) when a PDF page has no text layer
 - **Drag‑and‑drop**, cancellable extraction, light/minimal UI
 
@@ -70,19 +70,19 @@ Then in the app, set **Reading mode → OCR**.
 2. Pick a page range, or leave **All pages** ticked.
 3. Toggle the part‑of‑speech pills — **only the selected ones** end up in the output.
 4. (Optional) Tweak **Min. length** (default 3) and **Min. frequency** (default 2).
-5. Choose where the CSV should go and whether to export one combined file or split per POS.
+5. Choose where the output file should go, pick `.csv` or `.docx`, and decide whether to export one combined file or split per POS.
 6. Hit **Extract Vocabulary**.
 
 The status chip turns green and the file path appears at the bottom.
 
-### CSV format
+### Output format
 
 | lemma | pos  | frequency |
 |-------|------|-----------|
 | дом   | noun | 12        |
 | идти  | verb | 9         |
 
-`pos` ∈ `{noun, verb, adj, adv, other}`. Both `pos` and `frequency` columns are toggleable.
+The same columns are written to CSV or Word. `pos` ∈ `{noun, verb, adj, adv, other}`. Both `pos` and `frequency` columns are toggleable.
 
 ---
 

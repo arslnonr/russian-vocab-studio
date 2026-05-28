@@ -4,7 +4,7 @@ Russian Vocab Studio – extraction engine
 Pipeline: PDF -> Cyrillic tokens -> pymorphy3 lemmas -> filtered & counted -> CSV.
 
 Required:
-    pip install pymupdf pymorphy3 pymorphy3-dicts-ru
+    pip install pymupdf pymorphy3 pymorphy3-dicts-ru python-docx
 Optional (OCR for scanned PDFs):
     pip install easyocr            # heavy (~PyTorch); deep-learning OCR
     – or –
@@ -98,7 +98,7 @@ class ExtractOptions:
     include_frequency: bool = True
     include_pos: bool = True
     include_header: bool = True
-    export_mode: str = "single_csv"
+    export_mode: str = "single_file"
     reading_mode: str = "auto"
     ocr_dpi: int = 150                # 150 is enough for printed text and 2x faster than 220
     save_searchable_pdf: bool = True  # write a *_searchable.pdf alongside the CSV when OCR runs
@@ -534,7 +534,7 @@ def _save_searchable_pdf(
 
 
 # --------------------------------------------------------------------------- #
-# CSV writers
+# Output writers
 # --------------------------------------------------------------------------- #
 
 
@@ -542,7 +542,7 @@ def _write_csv(path: Path, rows: Iterable[WordRow], opts: ExtractOptions) -> Pat
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except PermissionError:
-        raise ExtractError("msg_csv_perm_denied", path=str(path))
+        raise ExtractError("msg_output_perm_denied", path=str(path))
 
     headers = ["lemma"]
     if opts.include_pos:
@@ -554,9 +554,9 @@ def _write_csv(path: Path, rows: Iterable[WordRow], opts: ExtractOptions) -> Pat
         fh = path.open("w", encoding="utf-8-sig", newline="")
     except PermissionError:
         # Most common cause on Windows: the file is open in Excel.
-        raise ExtractError("msg_csv_locked", path=str(path))
+        raise ExtractError("msg_output_locked", path=str(path))
     except OSError as e:
-        raise ExtractError("msg_csv_write_failed", path=str(path), err=str(e))
+        raise ExtractError("msg_output_write_failed", path=str(path), err=str(e))
 
     try:
         writer = csv.writer(fh)
@@ -574,9 +574,78 @@ def _write_csv(path: Path, rows: Iterable[WordRow], opts: ExtractOptions) -> Pat
     return path
 
 
+def _write_docx(path: Path, rows: Iterable[WordRow], opts: ExtractOptions) -> Path:
+    try:
+        from docx import Document
+    except ImportError as e:  # pragma: no cover
+        raise ExtractError("msg_docx_missing") from e
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        raise ExtractError("msg_output_perm_denied", path=str(path))
+
+    document = Document()
+    document.add_heading("Russian Vocabulary Export", level=1)
+
+    headers = ["lemma"]
+    if opts.include_pos:
+        headers.append("pos")
+    if opts.include_frequency:
+        headers.append("frequency")
+
+    rows_list = list(rows)
+    if not rows_list and not opts.include_header:
+        document.add_paragraph("No lemmas matched the current filters.")
+    else:
+        table = document.add_table(rows=1, cols=len(headers))
+        table.style = "Table Grid"
+
+        start_index = 0
+        if opts.include_header:
+            for index, header in enumerate(headers):
+                table.rows[0].cells[index].text = header
+        elif rows_list:
+            _fill_docx_row(table.rows[0].cells, rows_list[0], opts)
+            start_index = 1
+
+        for row in rows_list[start_index:]:
+            _fill_docx_row(table.add_row().cells, row, opts)
+
+    try:
+        document.save(path)
+    except PermissionError:
+        raise ExtractError("msg_output_locked", path=str(path))
+    except OSError as e:
+        raise ExtractError("msg_output_write_failed", path=str(path), err=str(e))
+    return path
+
+
+def _fill_docx_row(cells, row: WordRow, opts: ExtractOptions) -> None:
+    values = [row.lemma]
+    if opts.include_pos:
+        values.append(row.pos)
+    if opts.include_frequency:
+        values.append(str(row.frequency))
+
+    for index, value in enumerate(values):
+        cells[index].text = value
+
+
+def _resolve_output_writer(path: Path):
+    suffix = path.suffix.lower()
+    if suffix == ".docx":
+        return path, _write_docx
+    if suffix in {"", ".csv"}:
+        return (path.with_suffix(".csv") if suffix == "" else path), _write_csv
+    raise ExtractError("msg_output_unsupported", path=str(path))
+
+
 def _write_outputs(rows: list[WordRow], opts: ExtractOptions) -> list[Path]:
-    if opts.export_mode == "single_csv":
-        return [_write_csv(opts.csv_path, rows, opts)]
+    output_path, write_output = _resolve_output_writer(opts.csv_path)
+
+    if opts.export_mode == "single_file":
+        return [write_output(output_path, rows, opts)]
 
     grouped: defaultdict[str, list[WordRow]] = defaultdict(list)
     for r in rows:
@@ -584,10 +653,11 @@ def _write_outputs(rows: list[WordRow], opts: ExtractOptions) -> list[Path]:
 
     written: list[Path] = []
     if opts.export_mode == "both":
-        written.append(_write_csv(opts.csv_path, rows, opts))
+        written.append(write_output(output_path, rows, opts))
 
-    base = opts.csv_path.with_suffix("")
+    base = output_path.with_suffix("")
+    suffix = output_path.suffix or ".csv"
     for pos, items in grouped.items():
-        path = base.with_name(f"{base.name}_{pos}.csv")
-        written.append(_write_csv(path, items, opts))
+        path = base.with_name(f"{base.name}_{pos}{suffix}")
+        written.append(write_output(path, items, opts))
     return written
