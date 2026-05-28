@@ -64,6 +64,8 @@ PyInstaller produces a native bundle for the current operating system only. The 
 
 Artifacts are uploaded automatically by the workflow.
 
+If you push a tag such as `v0.1.0`, the same workflow also publishes both packaged files to the matching GitHub Release.
+
 ## First-run behavior
 
 - For normal text PDFs: no network is required.
