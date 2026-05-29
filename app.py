@@ -53,6 +53,35 @@ ACCENT_HOV  = "#2547D9"
 ACCENT_SOFT = "#E9EEFF"
 SUCCESS     = "#2C8C5A"
 DANGER      = "#C94B4B"
+SUPPORTED_OUTPUT_SUFFIXES = (".csv", ".docx")
+
+
+def output_suffix_for_path(output_text: str) -> str:
+    output_text = output_text.strip()
+    if not output_text:
+        return ".csv"
+    suffix = Path(output_text).suffix.lower()
+    if suffix in SUPPORTED_OUTPUT_SUFFIXES:
+        return suffix
+    return ".csv"
+
+
+def suggested_output_path(pdf_path: Path, output_text: str = "") -> Path:
+    return pdf_path.with_suffix(output_suffix_for_path(output_text))
+
+
+def should_refresh_output_path(previous_pdf: Optional[Path], current_output: str) -> bool:
+    current_output = current_output.strip()
+    if not current_output:
+        return True
+    if previous_pdf is None:
+        return False
+
+    current_path = Path(current_output).expanduser()
+    return current_path in {
+        previous_pdf.with_suffix(".csv"),
+        previous_pdf.with_suffix(".docx"),
+    }
 
 
 # Global stylesheet — applied once on the QApplication.
@@ -419,6 +448,7 @@ class MainWindow(QMainWindow):
         self._exclude_path: Optional[Path] = None
         self._page_count = 0
         self._worker: Optional[ExtractWorker] = None
+        self._pending_pdf_path: Optional[Path] = None
         self._adv_open = False
 
         self._build()
@@ -917,7 +947,12 @@ class MainWindow(QMainWindow):
     # ---------------------------- file picking ---------------------------- #
 
     def _pick_pdf(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
+        if (
+            self._worker is not None
+            and self._worker.isRunning()
+            and not self._worker.cancel_event.is_set()
+        ):
+            self._set_log(self.i18n.t("msg_cancel_before_switch"), state="info")
             return
         path, _ = QFileDialog.getOpenFileName(
             self, self.i18n.t("dlg_pdf_title"), "",
@@ -927,6 +962,23 @@ class MainWindow(QMainWindow):
             self._set_pdf(Path(path))
 
     def _set_pdf(self, path: Path) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            if self._worker.cancel_event.is_set():
+                self._pending_pdf_path = path
+                self._set_log(
+                    self.i18n.t("msg_pdf_queued", name=path.name),
+                    state="info",
+                )
+            else:
+                self._set_log(self.i18n.t("msg_cancel_before_switch"), state="info")
+            return
+
+        self._apply_pdf(path)
+
+    def _apply_pdf(self, path: Path) -> None:
+        previous_pdf = self._pdf_path
+        refresh_output = should_refresh_output_path(previous_pdf, self.csv_edit.text())
+
         self._pdf_path = path
         self._page_count = 0
         try:
@@ -936,13 +988,14 @@ class MainWindow(QMainWindow):
         except Exception:
             self._page_count = 0
 
-        if not self.csv_edit.text().strip():
+        if refresh_output:
             self.csv_edit.setText(str(self._suggest_output_path(path)))
 
-        if self._page_count:
-            self.start_spin.setRange(1, self._page_count)
-            self.end_spin.setRange(1, self._page_count)
-            self.end_spin.setValue(self._page_count)
+        max_page = max(1, self._page_count)
+        self.start_spin.setRange(1, max_page)
+        self.end_spin.setRange(1, max_page)
+        self.start_spin.setValue(1)
+        self.end_spin.setValue(max_page)
 
         self._refresh_pdf_meta()
 
@@ -1054,16 +1107,10 @@ class MainWindow(QMainWindow):
         )
 
     def _current_output_suffix(self) -> str:
-        output_text = self.csv_edit.text().strip()
-        if not output_text:
-            return ".csv"
-        suffix = Path(output_text).suffix.lower()
-        if suffix in {".csv", ".docx"}:
-            return suffix
-        return ".csv"
+        return output_suffix_for_path(self.csv_edit.text())
 
     def _suggest_output_path(self, pdf_path: Path) -> Path:
-        return pdf_path.with_suffix(self._current_output_suffix())
+        return suggested_output_path(pdf_path, self.csv_edit.text())
 
     def _normalize_output_path(self, raw_path: str, selected_filter: str) -> str:
         path = Path(raw_path)
@@ -1079,6 +1126,7 @@ class MainWindow(QMainWindow):
         if opts is None:
             return
 
+        self._csv_path = opts.csv_path
         self.action_btn.setText(self.i18n.t("action_extracting"))
         self.action_btn.setEnabled(False)
         self.cancel_btn.setVisible(True)
@@ -1088,15 +1136,33 @@ class MainWindow(QMainWindow):
         self._set_status(self.i18n.t("status_working"), state="working")
         self._set_log("", "info")
 
-        self._worker = ExtractWorker(opts)
-        self._worker.progress.connect(lambda p: self.progress.setValue(int(p * 1000)))
-        self._worker.stage.connect(self._on_stage)
-        self._worker.finished_ok.connect(self._on_extract_done)
-        self._worker.failed.connect(self._on_extract_error)
-        self._worker.cancelled.connect(self._on_extract_cancelled)
-        self._worker.start()
+        worker = ExtractWorker(opts)
+        self._worker = worker
+        worker.progress.connect(
+            lambda p, active_worker=worker: self._on_progress(active_worker, p)
+        )
+        worker.stage.connect(
+            lambda stage, active_worker=worker: self._on_stage(active_worker, stage)
+        )
+        worker.finished_ok.connect(
+            lambda result, active_worker=worker: self._on_extract_done(active_worker, result)
+        )
+        worker.failed.connect(
+            lambda message, active_worker=worker: self._on_extract_error(active_worker, message)
+        )
+        worker.cancelled.connect(
+            lambda active_worker=worker: self._on_extract_cancelled(active_worker)
+        )
+        worker.start()
 
-    def _on_stage(self, stage: str) -> None:
+    def _on_progress(self, worker: ExtractWorker, value: float) -> None:
+        if worker is not self._worker:
+            return
+        self.progress.setValue(int(value * 1000))
+
+    def _on_stage(self, worker: ExtractWorker, stage: str) -> None:
+        if worker is not self._worker:
+            return
         """Update status chip + log when the extractor signals a phase change."""
         if stage.startswith("ocr_page:"):
             # 'ocr_page:3/12'
@@ -1123,8 +1189,9 @@ class MainWindow(QMainWindow):
         self.cancel_btn.setEnabled(False)
         self._worker.cancel()
 
-    def _on_extract_done(self, result: ExtractResult) -> None:
-        self._reset_action_state()
+    def _on_extract_done(self, worker: ExtractWorker, result: ExtractResult) -> None:
+        if not self._reset_action_state(worker):
+            return
         self._set_status(self.i18n.t("status_done"), state="done")
         self.progress.setValue(1000)
         if not result.rows:
@@ -1148,14 +1215,16 @@ class MainWindow(QMainWindow):
             )
         self._set_log(msg, state="success")
 
-    def _on_extract_cancelled(self) -> None:
-        self._reset_action_state()
+    def _on_extract_cancelled(self, worker: ExtractWorker) -> None:
+        if not self._reset_action_state(worker):
+            return
         self._set_status(self.i18n.t("status_ready"), state="ready")
         self.progress.setVisible(False)
         self._set_log(self.i18n.t("msg_cancelled"), state="info")
 
-    def _on_extract_error(self, message: str) -> None:
-        self._reset_action_state()
+    def _on_extract_error(self, worker: ExtractWorker, message: str) -> None:
+        if not self._reset_action_state(worker):
+            return
         self._set_status(self.i18n.t("status_error"), state="error")
         self.progress.setVisible(False)
         # Translate ExtractError keys we encoded.
@@ -1168,11 +1237,18 @@ class MainWindow(QMainWindow):
                 pass
         self._set_log(self.i18n.t("msg_error", err=message), state="error")
 
-    def _reset_action_state(self) -> None:
+    def _reset_action_state(self, worker: ExtractWorker) -> bool:
+        if worker is not self._worker:
+            return False
         self.action_btn.setText(self.i18n.t("action_extract"))
         self.action_btn.setEnabled(True)
         self.cancel_btn.setVisible(False)
         self._worker = None
+        if self._pending_pdf_path is not None:
+            pending_path = self._pending_pdf_path
+            self._pending_pdf_path = None
+            self._apply_pdf(pending_path)
+        return True
 
     def closeEvent(self, event):
         if self._worker is not None and self._worker.isRunning():
